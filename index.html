@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>RGB K-Means Clustering</title>
+  <style>
+    body { font-family: sans-serif; }
+  .container { display: flex; gap: 30px; }
+  .panel { display: flex; flex-direction: column; align-items: center; }
+  img { max-width: 480px; max-height: 480px; border: 1px solid #ccc; }
+  #rgbPlot { width: 480px !important; height: 480px !important; }
+  </style>
+</head>
+<body>
+  <h2>RGB K-Means Clustering Demo</h2>
+  <input type="file" id="imgInput" accept="image/*"><br>
+  <label for="kRange">Number of clusters (k): <span id="kVal">3</span></label>
+  <input type="range" id="kRange" min="2" max="9" value="3">
+  <button id="runBtn">Run K-Means</button>
+  <div class="container">
+    <div class="panel">
+      <h4>Original Image</h4>
+      <img id="origImg" src="" alt="Original">
+    </div>
+    <div class="panel">
+  <h4>RGB Space</h4>
+  <div id="rgbPlot"></div>
+    </div>
+    <div class="panel">
+      <h4>Clustered Image</h4>
+      <img id="recolorImg" src="" alt="Clustered">
+    </div>
+  </div>
+  <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+  <script src="kmeans.js"></script>
+  <script>
+    const imgInput = document.getElementById('imgInput');
+    const origImg = document.getElementById('origImg');
+    const rgbPlot = document.getElementById('rgbPlot');
+    const recolorImg = document.getElementById('recolorImg');
+    const kRange = document.getElementById('kRange');
+    const kVal = document.getElementById('kVal');
+    const runBtn = document.getElementById('runBtn');
+    let imgData = null;
+    let imgW = 0, imgH = 0;
+    imgInput.onchange = e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(ev) {
+        origImg.src = ev.target.result;
+        // Load image to canvas to get pixel data
+        const img = new window.Image();
+        img.onload = function() {
+          imgW = img.width;
+          imgH = img.height;
+          const canvas = document.createElement('canvas');
+          canvas.width = imgW;
+          canvas.height = imgH;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          imgData = ctx.getImageData(0, 0, imgW, imgH);
+        };
+        img.src = ev.target.result;
+      };
+      reader.readAsDataURL(file);
+    };
+    kRange.oninput = () => {
+      kVal.textContent = kRange.value;
+    };
+    runBtn.onclick = () => {
+      if (!imgData) return alert('Please upload an image.');
+      runBtn.disabled = true;
+      runBtn.textContent = 'Processing...';
+      setTimeout(() => processKMeans(), 50);
+    };
+    function processKMeans() {
+      // Get pixels as [r,g,b]
+      const pixels = [];
+      for (let i = 0; i < imgData.data.length; i += 4) {
+        pixels.push([
+          imgData.data[i],
+          imgData.data[i+1],
+          imgData.data[i+2]
+        ]);
+      }
+      const k = parseInt(kRange.value);
+      const {labels, centroids} = kmeans(pixels, k, 10);
+      // Draw RGB scatter plot, color by centroid, no centroid markers
+      plotRGBScatter(pixels, labels, centroids);
+      // Recolor image
+      const recolor = new Uint8ClampedArray(imgData.data.length);
+      for (let i = 0; i < labels.length; i++) {
+        recolor[i*4] = Math.round(centroids[labels[i]][0]);
+        recolor[i*4+1] = Math.round(centroids[labels[i]][1]);
+        recolor[i*4+2] = Math.round(centroids[labels[i]][2]);
+        recolor[i*4+3] = 255;
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = imgW;
+      canvas.height = imgH;
+      const ctx = canvas.getContext('2d');
+      ctx.putImageData(new ImageData(recolor, imgW, imgH), 0, 0);
+      recolorImg.src = canvas.toDataURL();
+      runBtn.disabled = false;
+      runBtn.textContent = 'Run K-Means';
+    }
+    function plotRGBScatter(pixels, labels, centroids) {
+      // Downsample for speed
+      const N = 2000;
+      const idxs = [];
+      for (let i = 0; i < pixels.length; i += Math.ceil(pixels.length/N)) idxs.push(i);
+      const xs = idxs.map(i => pixels[i][0]);
+      const ys = idxs.map(i => pixels[i][1]);
+      const zs = idxs.map(i => pixels[i][2]);
+      // Color by centroid, but darken for contrast
+      const colors = idxs.map(i => {
+        const c = centroids[labels[i]];
+        // Darken by 50%
+        return `rgb(${Math.round(c[0]*0.5)},${Math.round(c[1]*0.5)},${Math.round(c[2]*0.5)})`;
+      });
+      const data = [
+        {
+          x: xs, y: ys, z: zs,
+          mode: 'markers',
+          type: 'scatter3d',
+          marker: { size: 2, color: colors, opacity: 0.7 },
+          name: 'Pixels'
+        }
+      ];
+      const layout = {
+        margin: {l:0, r:0, b:0, t:0},
+        scene: {xaxis:{title:'R'}, yaxis:{title:'G'}, zaxis:{title:'B'}},
+        width: 480, height: 480
+      };
+      Plotly.newPlot(rgbPlot, data, layout);
+    }
+  </script>
+</body>
+</html>
